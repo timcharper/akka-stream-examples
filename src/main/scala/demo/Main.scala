@@ -1,26 +1,23 @@
 package demo
 
-import akka.actor.{ActorRef, ActorSystem}
-import akka.stream.{OverflowStrategy,ActorMaterializer}
+import akka.actor.ActorSystem
+import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
+import akka.stream.scaladsl.Tcp.{IncomingConnection, ServerBinding}
+import scala.concurrent.Future
 
 object Main extends App {
   implicit val as = ActorSystem("hi")
   implicit val materializer = ActorMaterializer()
   import as.dispatcher
 
-  val tweetSource: Source[Tweet, () => Unit] =
-    Source.queue[Tweet](5, OverflowStrategy.dropNew).
-      mapMaterializedValue { input =>
-        // Does not print until code is run
-        println("Start")
-        Twitter.subscribePubnubChannel("pubnub-twitter") { tweet =>
-          input.offer(tweet)
-        }
+  val sockets: Source[IncomingConnection, Future[ServerBinding]] =
+    Tcp().bind("0.0.0.0", 8888)
 
-        { () => input.complete() }
-      }
+  sockets.runForeach { socket =>
+    socket.handleWith(Helpers.writing("hello!\n"))
+  }
 
-  // tweetSource.runForeach(println)
+  // nc localhost 8888
 }
 
