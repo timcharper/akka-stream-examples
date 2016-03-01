@@ -15,13 +15,6 @@ object Main extends App {
   implicit val materializer = ActorMaterializer()
   import as.dispatcher
 
-  def droppingBuffer[T](size: Int, strategy: OverflowStrategy = OverflowStrategy.backpressure):
-      Flow[T, T, NotUsed] =
-    Flow[T].conflate({ (first, second) =>
-      println(s"Bummer! Dropping ${second}")
-      first
-    }).buffer(size, strategy)
-
   val tweetSource: Source[Tweet, () => Unit] =
     Source.queue[Tweet](5, OverflowStrategy.dropNew).
       mapMaterializedValue { input =>
@@ -38,10 +31,18 @@ object Main extends App {
         { () => input.complete() }
       }
 
+  val summarizeOnBackpressure = Flow[Tweet].
+    conflateWithSeed(tweet => Map(tweet.place.country_code.getOrElse("??") -> 1)) { (m, tweet) =>
+      val country = tweet.place.country_code.getOrElse("??")
+      m + (country -> (m.getOrElse(country, 0) + 1))
+    }
+
+
   val sockets: Source[IncomingConnection, Future[ServerBinding]] =
     Tcp().bind("0.0.0.0", 8888)
 
   val pipeline = tweetSource.
+    via(summarizeOnBackpressure).
     zip(sockets)
 
   pipeline.runForeach { case (tweet, socket) =>
